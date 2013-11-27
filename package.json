@@ -1,0 +1,28 @@
+{
+  "name": "echelons",
+  "version": "0.0.0",
+  "description": "DSL for building JSON from your database (written on top of knex)",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "James Sadler <freshtonic@gmail.com>",
+  "license": "BSD-2-Clause",
+  "dependencies": {
+    "coffee-script": "~1.6.3",
+    "lodash": "~2.2.1",
+    "pg": "~2.8.2",
+    "restify": "~2.6.0",
+    "async": "~0.2.9",
+    "Q": "~0.9.7"
+  },
+  "devDependencies": {
+    "coffee-script": "",
+    "knex": "",
+    "mocha": "~1.14.0",
+    "should": "~2.0.2"
+  },
+  "scripts": {
+    "test": "mocha --compilers coffee:coffee-script -R spec test/index.coffee"
+  }
+}
