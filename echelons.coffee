@@ -1,92 +1,55 @@
 
 Q = require 'q'
 _ = require 'lodash'
+sys = require 'sys'
 
-class Context
-  constructor: ->
-    @results = {}
+class ResultsCache
+  constructor: (queries) ->
+    @deferreds = {}
+    for key,value of queries
+      @deferreds[key] = Q.defer()
   setValues: (queryKey, values) ->
-    @results[queryKey] = values
-  values: (queryKey, column) ->
-    _(@results[queryKey]).pluck column
+    console.log 'RESOLVED', queryKey, 'WITH', values
+    @deferreds[queryKey].resolve values
+    values
+  values: (queryKey) ->
+    @deferreds[queryKey].promise
 
-chainLeads = (queries, {from, to}) ->
-  return false if from.length is 0
-  return true if _.any from, (dep) -> dep is to
-  for dep in from
-    leads = chainLeads queries, from: queries[dep].$deps or [], to: to
-    return true if leads
-  false
-
-topoSortComparator = (queries) ->
-  (queryA, queryB) ->
-    if chainLeads(queries, from: queries[queryA.key].$deps or [], to: queryB.key)
-      1
-    else if chainLeads(queries, from: queries[queryB.key].$deps or [], to: queryA.key)
-      -1
-    else
-      0
-    
-topoSort = (queries) ->
-  (key: key for key of queries).sort topoSortComparator(queries)
-
+# Builds a tree structured like the JSON where each node only contains
+# an unresolved promise representing the future data for the node.
 buildTree = (queries, json, params) ->
   deferred = Q.defer()
   tree = {}
-  context = new Context()
+  resultsCache = new ResultsCache(queries)
 
-  tree = buildTreeRecursively queries, json, params, tree, context
+  tree = buildTreeRecursively queries, json, params, tree, resultsCache
 
-  console.log 'finished buildTreeRecursively '
-
-  Q.allSettled(promisesOf(tree)).then (results) ->
-    console.log 'resolved all promises', results
+  Q.all(promisesOf(tree)).then (results) ->
     deferred.resolve unwrapResults(tree)
-    console.log 'got here'
   , (err) ->
-    console.log 'failed to resolv all promises'
     deferred.reject new Error(err)
 
   deferred.promise
 
 unwrapResults = (tree) ->
   for key of tree when not key.match /^\$/
-    tree[key].$result = tree[key].$promise.value  # TODO get the value from here
+    tree[key].$result = tree[key].$promise.inspect().value
     delete tree[key].$promise
     unwrapResults tree[key]
   tree
 
 promisesOf = (tree) ->
   promises = []
-  for key of tree when not key.match /^\$/
-    promises.push tree[key].$promise
-    promises.concat promisesOf tree[key]
+  promises.push tree.$promise if tree.$promise?
+  for key of tree when not key.match(/^\$/)?
+    promises = promises.concat promisesOf tree[key]
   promises
 
-promisesFor = (deps, queries, context, params) ->
-  promises = []
-  for dep in deps
-    do (dep) ->
-      promises.concat promisesFor(queries[dep].$deps or [], queries, context, params)
-      queryResultPromise = queries[dep].$query(context, params).then (result) ->
-        console.log 'resolved queryResultPromise'
-        context.setValues dep, result
-      , (err) ->
-        console.log 'WTF!!', err
-      promises.push queryResultPromise
-  promises
-
-buildTreeRecursively = (queries, json, params, tree, context) ->
+buildTreeRecursively = (queriesByKey, json, params, tree, resultsCache) ->
   for key, value of json when not key.match(/^\$/)? and not _.isFunction(value)
-    queryObj = queries[key]
-    promise = Q.all promisesFor(queryObj.$deps or [], queries, context, {})
-    promise.then ->
-      console.log 'resolved promise for all deps'
-    , (err) ->
-      console.log 'failed to resolve promise for all deps'
-    tree[key] = { $promise: promise }
+    tree[key] = $promise: queriesByKey[key].$query(resultsCache, params)
     jsonObj = if _.isArray(value) then value[0] else value
-    buildTreeRecursively queries, jsonObj, params, tree[key], context
+    buildTreeRecursively queriesByKey, jsonObj, params, tree[key], resultsCache
   tree
 
 Echelons =
@@ -94,7 +57,6 @@ Echelons =
     buildTree queries, json, params
   topoSort: (queries) ->
     topoSort queries
-
 
 module.exports = Echelons
 
